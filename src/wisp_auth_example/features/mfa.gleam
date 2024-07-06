@@ -10,13 +10,16 @@ import gleam/result
 import gleam/string
 import gleam/string_builder
 import wisp.{type Request}
+import wisp_auth_example/features/shared/auth
 import wisp_auth_example/token
 import wisp_auth_example/web.{type Context}
 import youid/uuid
 
 pub fn generate_server_code() -> String {
-  // 2^40
-  int.random(1_099_511_627_776)
+  // Erlang Gleam backend uses:
+  // float.random() *. to_float(max)
+  // Ergo we use 2^53 - 1
+  int.random(9_007_199_254_740_991)
   |> int.to_string()
   |> string.slice(0, 6)
   |> string.pad_right(to: 6, with: "0")
@@ -24,7 +27,12 @@ pub fn generate_server_code() -> String {
 
 const temp_session_expiration_minutes = 5
 
-pub fn create_mfa_session(db: pgo.Connection, user_id: String) -> token.Token {
+const mfa_attempt_threshold = 5
+
+pub fn create_mfa_session(
+  db: pgo.Connection,
+  user_id: String,
+) -> #(token.Token, String) {
   let token = token.new()
   let code = generate_server_code()
 
@@ -55,7 +63,7 @@ pub fn create_mfa_session(db: pgo.Connection, user_id: String) -> token.Token {
     )
 
   io.println(code)
-  token
+  #(token, code)
 }
 
 pub fn handler(req: Request, ctx: Context) {
@@ -95,12 +103,11 @@ pub fn mfa_attempt(req: Request, ctx: Context) {
     Ok(#(token, code)) -> {
       let sql =
         "
-        select wuser_id::text
+        select wuser_id, verification_code
         from mfa_temp_session
         where id = $1
           and verification_hash = $2
           and expires_at > now()
-          and verification_code = $3
       "
 
       let assert Ok(response) =
@@ -110,60 +117,68 @@ pub fn mfa_attempt(req: Request, ctx: Context) {
           [
             pgo.text(token.id |> uuid.to_string()),
             pgo.bytea(token |> token.verification_hash()),
-            pgo.text(code),
           ],
-          dynamic.element(0, dynamic.string),
+          dynamic.tuple2(auth.dynamic_uuid, dynamic.string),
         )
 
       case response.rows {
-        [user_id] -> {
-          let token = token.new()
-          let expiration = birl.utc_now() |> birl.add(duration.days(7))
-          let session_sql =
-            "
-              insert into wuser_session
-              (id, verification_hash, expires_at, wuser_id)
-              values
-              ($1, $2, $3, $4)
-            "
+        [#(user_id, verification_code)] -> {
+          case code == verification_code {
+            False -> {
+              case auth.record_mfa_login_failure(ctx.db, user_id) {
+                Ok(auth.MfaFailureCount(count)) -> {
+                  case count >= mfa_attempt_threshold {
+                    True -> {
+                      // If we've gotten to this point,
+                      // someone has the correct email+password but is failing on MFA
+                      // In that case, we should lock the account and notify the user
+                      // TODO: notify user
+                      let assert Ok(_) = auth.lock_user_account(ctx.db, user_id)
+                      Nil
+                    }
+                    False -> Nil
+                  }
+                }
+                Error(err) -> {
+                  io.debug(err)
+                  Nil
+                }
+              }
+              auth.delay()
+              wisp.response(401)
+            }
+            True -> {
+              let assert Ok(session_token) =
+                pgo.transaction(ctx.db, fn(db) {
+                  let cleanup_sql =
+                    "
+                      delete from mfa_temp_session
+                      where id = $1
+                    "
+                  let assert Ok(session_token) =
+                    auth.create_user_session(db, user_id)
 
-          let login_update_sql =
-            "
-            update wuser
-            set last_login = now(), failed_login_count = 0
-          "
+                  let assert Ok(_) =
+                    pgo.execute(
+                      cleanup_sql,
+                      db,
+                      [pgo.text(token.id |> uuid.to_string())],
+                      dynamic.dynamic,
+                    )
 
-          let assert Ok(_) =
-            pgo.transaction(ctx.db, fn(db) {
-              let assert Ok(_) =
-                pgo.execute(
-                  session_sql,
-                  db,
-                  [
-                    pgo.text(token.id |> uuid.to_string()),
-                    pgo.bytea(token |> token.verification_hash()),
-                    pgo.timestamp(
-                      expiration |> birl.to_erlang_universal_datetime(),
-                    ),
-                    pgo.text(user_id),
-                  ],
-                  dynamic.dynamic,
-                )
+                  Ok(session_token)
+                })
 
-              let assert Ok(_) =
-                pgo.execute(login_update_sql, db, [], dynamic.dynamic)
-
-              Ok(dynamic.from(0))
-            })
-
-          wisp.redirect("/user-demo")
-          |> wisp.set_cookie(
-            req,
-            "session",
-            token.to_string(token),
-            wisp.Signed,
-            60 * 60 * 24 * 7,
-          )
+              wisp.redirect("/user-demo")
+              |> wisp.set_cookie(
+                req,
+                "session",
+                token.to_string(session_token),
+                wisp.Signed,
+                60 * 60 * 24 * 7,
+              )
+            }
+          }
         }
         _ -> wisp.bad_request()
       }
