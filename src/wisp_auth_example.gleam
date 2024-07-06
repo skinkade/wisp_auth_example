@@ -4,7 +4,6 @@ import gleam/pgo
 import mist
 import wisp
 import wisp_auth_example/router
-import wisp_auth_example/web
 
 pub fn main() {
   wisp.configure_logger()
@@ -21,9 +20,7 @@ pub fn main() {
       ),
     )
 
-  let context = web.Context(db: db)
-
-  let handler = router.handle_request(_, context)
+  let handler = router.handle_request(_, db)
 
   let assert Ok(_) =
     handler

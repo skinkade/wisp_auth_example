@@ -2,7 +2,7 @@ import gleam/pgo
 import wisp
 
 pub type Context {
-  Context(db: pgo.Connection)
+  Context(db: pgo.Connection, request_id: String)
 }
 
 pub fn middleware(

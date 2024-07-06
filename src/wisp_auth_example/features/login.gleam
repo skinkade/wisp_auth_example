@@ -4,34 +4,51 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/string_builder
+import lustre/attribute
+import lustre/element
+import lustre/element/html
 import wisp.{type Request}
 import wisp_auth_example/features/mfa
 import wisp_auth_example/features/shared/auth
+import wisp_auth_example/helpers
 import wisp_auth_example/token
 import wisp_auth_example/web.{type Context}
 import youid/uuid
 
 pub fn login_handler(req: Request, ctx: Context) {
   case req.method {
-    Get -> login_view()
+    Get -> login_view(req, ctx)
     Post -> login_attempt(req, ctx)
     _ -> wisp.method_not_allowed([Get, Post])
   }
 }
 
-pub fn login_view() {
+pub fn login_view(req, ctx) {
   let html =
-    string_builder.from_string(
-      "<form method='post'>
-        <label>Email:
-          <input type='email' name='email'>
-        </label>
-        <label>Password:
-          <input type='password' name='password'>
-        </label>
-        <input type='submit' value='Submit'>
-      </form>",
-    )
+    helpers.form(req, ctx, [], [
+      html.label([], [
+        html.text("Email:"),
+        html.input([attribute.type_("email"), attribute.name("email")]),
+      ]),
+      html.label([], [
+        html.text("Password:"),
+        html.input([attribute.type_("password"), attribute.name("password")]),
+      ]),
+      html.input([attribute.type_("submit"), attribute.value("Submit")]),
+    ])
+    |> element.to_document_string_builder()
+  // let html =
+  //   string_builder.from_string(
+  //     "<form method='post'>
+  //       <label>Email:
+  //         <input type='email' name='email'>
+  //       </label>
+  //       <label>Password:
+  //         <input type='password' name='password'>
+  //       </label>
+  //       <input type='submit' value='Submit'>
+  //     </form>",
+  //   )
   wisp.ok()
   |> wisp.html_body(html)
 }
