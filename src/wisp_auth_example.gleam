@@ -21,9 +21,9 @@ pub fn main() {
       ),
     )
 
-  let context = web.Context(db: db, static_dir: static_directory())
+  // let context = web.Context(db: db, static_dir: static_directory())
 
-  let handler = router.handle_request(_, context)
+  let handler = router.handle_request(_, db, static_directory())
 
   let assert Ok(_) =
     handler

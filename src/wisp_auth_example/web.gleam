@@ -1,8 +1,14 @@
+import gleam/option.{type Option}
 import gleam/pgo
 import wisp
+import wisp_auth_example/models/user
 
 pub type Context {
-  Context(db: pgo.Connection, static_dir: String)
+  Context(
+    db: pgo.Connection,
+    static_dir: String,
+    user: Option(user.UserDbRecord),
+  )
 }
 
 pub fn middleware(

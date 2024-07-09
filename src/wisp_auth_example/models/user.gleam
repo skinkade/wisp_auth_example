@@ -1,6 +1,8 @@
 import birl.{type Time}
+import gleam/bool
 import gleam/dynamic.{type Dynamic}
 import gleam/option.{type Option, None, Some}
+import gleam/order
 import gleam/pgo.{type Connection}
 import gleam/result
 import wisp_auth_example/types/email.{type Email}
@@ -102,6 +104,37 @@ pub fn create(
   Ok(user)
 }
 
+pub fn get_by_id(
+  conn: Connection,
+  user_id: UserId,
+) -> Result(Option(UserDbRecord), pgo.QueryError) {
+  let sql =
+    "
+    select
+        id,
+        email,
+        email_verified_at::text,
+        password_hash,
+        created_at::text,
+        disabled_at::text,
+        last_login::text,
+        login_failures,
+        locked_until::text
+    from users
+    where id = $1
+  "
+
+  use result <- result.try({
+    pgo.execute(sql, conn, [id_pgo(user_id)], from_dynamic_tuple)
+  })
+
+  case result.rows {
+    [] -> Ok(None)
+    [user] -> Ok(Some(user))
+    _ -> panic as "Unreachable"
+  }
+}
+
 pub fn get_by_email(
   conn: Connection,
   email: Email,
@@ -126,7 +159,7 @@ pub fn get_by_email(
     pgo.execute(
       sql,
       conn,
-      [email |> email.to_string |> pgo.text],
+      [email |> email.to_string() |> pgo.text()],
       from_dynamic_tuple,
     )
   })
@@ -135,5 +168,19 @@ pub fn get_by_email(
     [] -> Ok(None)
     [user] -> Ok(Some(user))
     _ -> panic as "Multiple users with same email"
+  }
+}
+
+pub fn disabled_or_locked(user: UserDbRecord) {
+  use <- bool.guard(option.is_some(user.disabled_at), True)
+
+  case user.locked_until {
+    None -> False
+    Some(ts) -> {
+      case birl.compare(birl.utc_now(), ts) {
+        order.Lt -> False
+        _ -> True
+      }
+    }
   }
 }

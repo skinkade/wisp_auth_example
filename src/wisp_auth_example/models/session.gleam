@@ -4,6 +4,7 @@ import gleam/bit_array
 import gleam/crypto
 import gleam/dynamic
 import gleam/option.{type Option, None, Some}
+import gleam/order
 import gleam/pgo.{type Connection}
 import gleam/result
 import wisp
@@ -32,7 +33,7 @@ pub fn key_to_string(session_key: SessionKey) -> String {
 pub fn create_with_defaults(
   conn: Connection,
   user_id: UserId,
-) -> Result(SessionKey, pgo.QueryError) {
+) -> Result(#(SessionKey, Int), pgo.QueryError) {
   let session_key = wisp.random_string(32)
   let session_hash =
     crypto.hash(crypto.Sha256, bit_array.from_string(session_key))
@@ -43,7 +44,7 @@ pub fn create_with_defaults(
         insert into user_sessions
         (session_hash, user_id, created_at, expires_at)
         values
-        ($1, $2, $3, $)
+        ($1, $2, $3, $4)
     "
 
   let now = birl.utc_now()
@@ -63,7 +64,9 @@ pub fn create_with_defaults(
     )
   })
 
-  Ok(SessionKey(session_key))
+  let seconds_until_expiration = default_session_days * 24 * 60 * 60 - 1
+
+  Ok(#(SessionKey(session_key), seconds_until_expiration))
 }
 
 fn decode_session_record(d: dynamic.Dynamic) {
@@ -103,5 +106,12 @@ pub fn get_by_session_key_string(
   case result.rows {
     [session] -> Ok(Some(session))
     _ -> Ok(None)
+  }
+}
+
+pub fn expired(session: SessionQueryRecord) -> Bool {
+  case birl.compare(birl.utc_now(), session.expires_at) {
+    order.Gt -> True
+    _ -> False
   }
 }

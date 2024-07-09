@@ -15,6 +15,7 @@ import lustre/element.{type Element}
 import lustre/element/html
 import wisp.{type Request, type Response}
 import wisp_auth_example/html_templating.{form_error, form_field}
+import wisp_auth_example/models/session
 import wisp_auth_example/models/user
 import wisp_auth_example/types/email.{type Email}
 import wisp_auth_example/types/password.{type Password}
@@ -37,25 +38,11 @@ type LoginError {
   UnknownLoginError
 }
 
-fn disabled_or_locked(user: user.UserDbRecord) {
-  use <- bool.guard(option.is_some(user.disabled_at), True)
-
-  case user.locked_until {
-    None -> False
-    Some(ts) -> {
-      case birl.compare(birl.utc_now(), ts) {
-        order.Lt -> False
-        _ -> True
-      }
-    }
-  }
-}
-
 fn login(
   conn: pgo.Connection,
   email: Email,
   password: Password,
-) -> Result(user.UserDbRecord, LoginError) {
+) -> Result(#(session.SessionKey, Int), LoginError) {
   use user <- result.try({
     case user.get_by_email(conn, email) {
       Ok(user) -> Ok(user)
@@ -70,14 +57,24 @@ fn login(
 
   let assert Some(user) = user
 
-  use <- bool.guard(disabled_or_locked(user), Error(InvalidCredentials))
+  use <- bool.guard(user.disabled_or_locked(user), Error(InvalidCredentials))
 
   use <- bool.guard(
     !password.valid(password, user.password_hash),
     Error(InvalidCredentials),
   )
 
-  Ok(user)
+  use session <- result.try({
+    case session.create_with_defaults(conn, user.id) {
+      Ok(session) -> Ok(session)
+      Error(e) -> {
+        io.debug(e)
+        Error(UnknownLoginError)
+      }
+    }
+  })
+
+  Ok(session)
 }
 
 fn login_form() -> Response {
@@ -109,7 +106,16 @@ fn submit_login_form(req: Request, ctx: Context) -> Response {
     // The form was valid! Do something with the data and render a page to the user
     Ok(data) -> {
       case login(ctx.db, data.email, data.password) {
-        Ok(user) -> render_demo(user) |> wisp.html_response(200)
+        Ok(#(session_key, seconds_until_expiration)) -> {
+          wisp.redirect("/demo")
+          |> wisp.set_cookie(
+            req,
+            "session",
+            session.key_to_string(session_key),
+            wisp.Signed,
+            seconds_until_expiration,
+          )
+        }
         Error(InvalidCredentials) -> {
           html_templating.base_html("Login", [
             render_login_form(
@@ -164,20 +170,5 @@ fn render_login_form(form: Form, error: Option(String)) {
         ]),
       ],
     ),
-  ])
-}
-
-fn render_demo(user: user.UserDbRecord) {
-  html_templating.base_html("Welcome!", [
-    html.div([attribute.class("flex justify-center p-4 xs:mt-8 sm:mt-16")], [
-      html.div(
-        [
-          attribute.class(
-            "min-w-96 max-w-96 border rounded drop-shadow-sm p-4 flex flex-col justify-center",
-          ),
-        ],
-        [html.span([], [html.text("Welcome, " <> email.to_string(user.email))])],
-      ),
-    ]),
   ])
 }
