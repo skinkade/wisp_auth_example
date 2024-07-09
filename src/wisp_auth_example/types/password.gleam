@@ -1,6 +1,7 @@
 import antigone
 import gleam/bit_array
 import gleam/bool
+import gleam/int
 import gleam/list
 import gleam/regex
 import gleam/result
@@ -71,13 +72,14 @@ fn normalize(str) {
 
 // https://www.rfc-editor.org/rfc/rfc8265.html#section-4
 // TODO: add parse/validation error types
-pub fn create(str: String) -> Result(Password, Nil) {
+pub fn create(str: String) -> Result(Password, String) {
   let trimmed = string.trim(str)
-  use <- bool.guard(string.is_empty(trimmed), Error(Nil))
+  use <- bool.guard(string.is_empty(trimmed), Error("Password cannot be empty"))
 
-  use normalized <- result.try(normalize(trimmed))
-
-  Ok(Password(normalized))
+  case normalize(trimmed) {
+    Error(_) -> Error("Password contains invalid characters")
+    Ok(normalized) -> Ok(Password(normalized))
+  }
 }
 
 pub fn to_string(password: Password) -> String {
@@ -94,4 +96,35 @@ pub fn hash(password: Password) -> String {
 
 pub fn valid(password: Password, hash: String) -> Bool {
   antigone.verify(to_bytes(password), hash)
+}
+
+pub type PasswordPolicy {
+  PasswordPolicy(min_length: Int, max_length: Int)
+}
+
+pub fn policy_compliant(
+  password: Password,
+  policy: PasswordPolicy,
+) -> Result(Password, String) {
+  let raw = to_string(password)
+
+  use <- bool.guard(
+    string.length(raw) < policy.min_length,
+    Error(
+      "Password must be at least "
+      <> int.to_string(policy.min_length)
+      <> " characters",
+    ),
+  )
+
+  use <- bool.guard(
+    string.length(raw) > policy.max_length,
+    Error(
+      "Password must be no more than "
+      <> int.to_string(policy.max_length)
+      <> " characters",
+    ),
+  )
+
+  Ok(password)
 }

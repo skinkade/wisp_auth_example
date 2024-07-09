@@ -24,6 +24,7 @@ gleam_erlang = ">= 0.25.0 and < 1.0.0"
 mist = ">= 1.2.0 and < 2.0.0"
 gleam_http = ">= 3.6.0 and < 4.0.0"
 antigone = ">= 1.1.0 and < 2.0.0"
+formal = ">= 2.0.0 and < 3.0.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

@@ -9,25 +9,27 @@ pub opaque type Email {
 }
 
 // https://thecopenhagenbook.com/email-verification#input-validation
-pub fn parse(str: String) -> Result(Email, Nil) {
+pub fn parse(str: String) -> Result(Email, String) {
+  let error = Error("Invalid email")
+
   let str = string.trim(str)
-  use <- bool.guard(string.is_empty(str), Error(Nil))
-  use <- bool.guard(string.length(str) > 255, Error(Nil))
+  use <- bool.guard(string.is_empty(str), error)
+  use <- bool.guard(string.length(str) > 255, error)
 
   use #(head, domain) <- result.try({
     case string.split(str, "@") {
       [head, domain] -> Ok(#(head, domain))
       [head, ..tail] -> {
-        use <- bool.guard(list.is_empty(tail), Error(Nil))
+        use <- bool.guard(list.is_empty(tail), Error("Invalid email"))
         let assert Ok(domain) = list.last(tail)
         Ok(#(head, domain))
       }
-      _ -> Error(Nil)
+      _ -> Error("Invalid email")
     }
   })
 
-  use <- bool.guard(string.is_empty(head), Error(Nil))
-  use <- bool.guard(string.is_empty(domain), Error(Nil))
+  use <- bool.guard(string.is_empty(head), error)
+  use <- bool.guard(string.is_empty(domain), error)
 
   use <- bool.guard(
     {
@@ -41,7 +43,7 @@ pub fn parse(str: String) -> Result(Email, Nil) {
         _ -> True
       }
     },
-    Error(Nil),
+    error,
   )
 
   Ok(Email(str))

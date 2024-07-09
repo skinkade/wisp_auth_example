@@ -75,9 +75,9 @@ pub fn create(
   let sql =
     "
         insert into users
-        (id, email, email_verified_at, password_hash, created_at, last_login, login_failures, locked_until)
+        (id, email, email_verified_at, password_hash, created_at, disabled_at, last_login, login_failures, locked_until)
         values
-        ($1, $2, $3, $4, $5, $6, $7, $8)
+        ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     "
 
   use _ <- result.try({
